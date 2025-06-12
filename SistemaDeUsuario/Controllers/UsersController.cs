@@ -22,7 +22,11 @@ namespace SistemaDeUsuario.Controllers
         // GET: Users
         public async Task<IActionResult> Index()
         {
-            return View(await _context.Users.ToListAsync());
+            var ActiveUsers = _context.Users
+            .Where(u => u.IsActive) // filtra no banco
+            .ToList();
+
+                return View(ActiveUsers);
         }
 
         // GET: Users/Details/5
@@ -117,7 +121,7 @@ namespace SistemaDeUsuario.Controllers
         }
 
         // GET: Users/Delete/5
-        public async Task<IActionResult> Delete(int? id)
+        public async Task<IActionResult> Deactivate(int? id)
         {
             if (id == null)
             {
@@ -135,14 +139,14 @@ namespace SistemaDeUsuario.Controllers
         }
 
         // POST: Users/Delete/5
-        [HttpPost, ActionName("Delete")]
+        [HttpPost, ActionName("Deactivate")]
         [ValidateAntiForgeryToken]
-        public async Task<IActionResult> DeleteConfirmed(int id)
+        public async Task<IActionResult> DeactivateConfirmed(int id)
         {
             var user = await _context.Users.FindAsync(id);
             if (user != null)
             {
-                _context.Users.Remove(user);
+                user.Deactivate();
             }
 
             await _context.SaveChangesAsync();
