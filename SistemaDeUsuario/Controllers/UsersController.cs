@@ -19,6 +19,7 @@ namespace SistemaDeUsuario.Controllers
             _context = context;
         }
 
+
         // GET: Users
         public async Task<IActionResult> Index()
         {
@@ -28,6 +29,7 @@ namespace SistemaDeUsuario.Controllers
 
                 return View(ActiveUsers);
         }
+        
 
         // GET: Users/Details/5
         public async Task<IActionResult> Details(int? id)
@@ -60,12 +62,7 @@ namespace SistemaDeUsuario.Controllers
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> Create([Bind("Id,Name,Email,Password,IsActive")] User user)
         {
-            if (ModelState.IsValid)
-            {
-                _context.Add(user);
-                await _context.SaveChangesAsync();
-                return RedirectToAction(nameof(Index));
-            }
+            
             return View(user);
         }
 

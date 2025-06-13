@@ -8,5 +8,8 @@ namespace SistemaDeUsuario.Data
         {
         }
         public DbSet<SistemaDeUsuario.Models.User> Users { get; set; }
+
     }
+
+
 }
