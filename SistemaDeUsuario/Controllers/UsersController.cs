@@ -1,12 +1,20 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Threading.Tasks;
+﻿using BCrypt.Net;
+using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Authentication.Cookies;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Rendering;
+using Microsoft.CodeAnalysis.Scripting;
 using Microsoft.EntityFrameworkCore;
 using SistemaDeUsuario.Data;
 using SistemaDeUsuario.Models;
+using SistemaDeUsuario.Services;
+using System;
+using System.Collections.Generic;
+using System.ComponentModel.DataAnnotations;
+using System.Linq;
+using System.Security.Claims;
+using System.Threading.Tasks;
 
 namespace SistemaDeUsuario.Controllers
 {
@@ -14,9 +22,15 @@ namespace SistemaDeUsuario.Controllers
     {
         private readonly UsersDbContext _context;
 
-        public UsersController(UsersDbContext context)
+        private readonly UserValidatorService _validator;
+
+        private readonly AuthService _authService;
+
+        public UsersController(UsersDbContext context, UserValidatorService validator, AuthService authservice)
         {
             _context = context;
+            _validator = validator;
+            _authService = authservice;
         }
 
 
@@ -27,32 +41,50 @@ namespace SistemaDeUsuario.Controllers
             .Where(u => u.IsActive) // filtra no banco
             .ToList();
 
-                return View(ActiveUsers);
+            return View(ActiveUsers);
         }
-        
+
 
         // GET: Users/Details/5
-        public async Task<IActionResult> Details(int? id)
+        public async Task<IActionResult> Profile(int? id)
         {
-            if (id == null)
+            var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+
+            if (string.IsNullOrEmpty(userIdClaim) || !int.TryParse(userIdClaim, out int userId))
             {
-                return NotFound();
+                return Unauthorized();
             }
 
-            var user = await _context.Users
-                .FirstOrDefaultAsync(m => m.Id == id);
+            var user = await _context.Users.FirstOrDefaultAsync(u => u.Id == userId);
             if (user == null)
             {
                 return NotFound();
             }
 
-            return View(user);
+            return View("Profile", user); // Reaproveita a View existente
         }
 
         // GET: Users/Create
         public IActionResult Create()
         {
             return View();
+        }
+
+        private async Task ValidateUserAsync(User user)
+        {
+            var normalizedEmail = user.Email?.Trim().ToLowerInvariant();
+            user.Email = normalizedEmail;
+
+            if (await _validator.DoesEmailExistAsync(user.Email))
+            {
+                ModelState.AddModelError("Email", "Este e-mail já está em uso.");
+            }
+
+            var passwordError = _validator.GetPasswordValidationError(user.Password);
+            if (passwordError != null)
+            {
+                ModelState.AddModelError("Password", passwordError);
+            }
         }
 
         // POST: Users/Create
@@ -62,12 +94,22 @@ namespace SistemaDeUsuario.Controllers
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> Create([Bind("Id,Name,Email,Password,IsActive")] User user)
         {
-            
+            await ValidateUserAsync(user);
+
+            user.Password = BCrypt.Net.BCrypt.HashPassword(user.Password);
+
+            if (ModelState.IsValid)
+            {
+                
+                _context.Add(user);
+                await _context.SaveChangesAsync();
+                return RedirectToAction("Login", "Users");
+            }
             return View(user);
         }
 
         // GET: Users/Edit/5
-        public async Task<IActionResult> Edit(int? id)
+        public async Task<IActionResult> Settings(int? id)
         {
             if (id == null)
             {
@@ -87,12 +129,14 @@ namespace SistemaDeUsuario.Controllers
         // For more details, see http://go.microsoft.com/fwlink/?LinkId=317598.
         [HttpPost]
         [ValidateAntiForgeryToken]
-        public async Task<IActionResult> Edit(int id, [Bind("Id,Name,Email,Password,IsActive")] User user)
+        public async Task<IActionResult> Settings(int id, [Bind("Id,Name,Email,Password,IsActive")] User user)
         {
             if (id != user.Id)
             {
                 return NotFound();
             }
+
+            await ValidateUserAsync(user);
 
             if (ModelState.IsValid)
             {
@@ -154,5 +198,56 @@ namespace SistemaDeUsuario.Controllers
         {
             return _context.Users.Any(e => e.Id == id);
         }
+
+        public IActionResult Login()
+        {
+            return View();
+        }
+
+
+
+    [HttpPost]
+    [ValidateAntiForgeryToken]
+    public async Task<IActionResult> Login(LoginUser model)
+    {
+        if (!ModelState.IsValid)
+            return View(model);
+
+        var user = await _authService.AuthenticateAsync(model.Email, model.Password);
+
+        if (user == null)
+        {
+            ModelState.AddModelError("", "E-mail ou senha inválidos.");
+            return View(model);
+        }
+
+        var claims = new List<Claim>
+    {
+        new Claim(ClaimTypes.Name, user.Name),
+        new Claim(ClaimTypes.NameIdentifier, user.Id.ToString()),
+        new Claim(ClaimTypes.Email, user.Email)
+    };
+
+        var identity = new ClaimsIdentity(claims, CookieAuthenticationDefaults.AuthenticationScheme);
+        var principal = new ClaimsPrincipal(identity);
+
+        await HttpContext.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme, principal);
+
+        return RedirectToAction("Index", "Home");
+    }
+
+        [Authorize]
+        public async Task<IActionResult> Logout()
+        {
+            // Remove a autenticação por cookies
+            await HttpContext.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
+
+            // Limpa a sessão se você estiver usando
+            HttpContext.Session.Clear();
+
+            // Redireciona para a tela inicial ou login
+            return RedirectToAction("Login", "Users");
+        }
+
     }
 }
